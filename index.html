@@ -56,10 +56,24 @@ button{font:inherit;color:inherit;border:0;cursor:pointer}
 @keyframes pop{0%{opacity:1;transform:scale(1.5)}70%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.9)}}
 #pulse{position:absolute;inset:0;border:0 solid var(--accent);pointer-events:none;opacity:0}
 #redo{background:#0009;border-radius:999px;padding:10px 16px;font-size:14px;margin-top:10px;visibility:hidden}
+/* the beat lane: the dot travels to the line, the line is the beat */
+#lane{position:relative;height:50px;margin-top:26px;direction:ltr;visibility:hidden}
+#shoot.rec #lane{visibility:visible}
+#lane::before{content:"";position:absolute;left:0;right:0;top:22px;height:6px;border-radius:3px;background:#fff4}
+#laneLine{position:absolute;top:0;bottom:0;width:8px;margin-left:-4px;background:var(--accent);border-radius:4px;box-shadow:0 0 16px var(--accent)}
+#laneDot{position:absolute;top:11px;width:28px;height:28px;margin-left:-14px;border-radius:50%;background:#fff;box-shadow:0 0 12px #000}
+.mk{position:absolute;top:34px;transform:translateX(-50%);font-size:12px;color:#ddd;white-space:nowrap}
+.mk.hit{top:-22px;color:var(--accent);font-weight:900;font-size:15px}
+.cal{width:min(420px,100%);display:grid;gap:8px;background:var(--card);border-radius:16px;padding:12px}
+.cal p{margin:0;font-size:13px;color:var(--dim);text-align:center}
+.cal .row button{font-size:14px;padding:11px 8px;background:#262633}
 
 /* render + done */
-#render,#done{align-items:center;justify-content:center;gap:14px;padding:16px 16px calc(18px + env(safe-area-inset-bottom))}
-#cv,#out{height:min(68vh,calc((100vw - 32px) * 16 / 9));aspect-ratio:9/16;border-radius:16px;background:#000;max-width:100%}
+#render,#done{align-items:center;justify-content:center;gap:12px;padding:16px 16px calc(18px + env(safe-area-inset-bottom))}
+#done{justify-content:flex-start;overflow:auto}
+#cv{height:min(68vh,calc((100vw - 32px) * 16 / 9))}
+#out{height:min(52vh,calc((100vw - 32px) * 16 / 9));flex:none}
+#cv,#out{aspect-ratio:9/16;border-radius:16px;background:#000;max-width:100%}
 .row{display:flex;gap:10px;width:min(420px,100%)}
 .row button{flex:1;padding:14px 10px;border-radius:999px;font-weight:800;font-size:17px;background:var(--card)}
 .row button.pri{background:var(--accent);color:#111}
@@ -79,7 +93,7 @@ h3{margin:0;font-size:20px}
     <ol id="steps"></ol>
   </div>
   <button class="go" id="start">מתחילים 👏</button>
-  <p class="fine">צריך לאשר מצלמה ומיקרופון. הסרטון נשאר רק במכשיר שלכם.<br>אב-טיפוס 0.1 · מוזיקת הדגמה</p>
+  <p class="fine">צריך לאשר מצלמה ומיקרופון. הסרטון נשאר רק במכשיר שלכם.<br>אב-טיפוס 0.2 · מוזיקת הדגמה</p>
 </section>
 
 <section id="shoot" class="screen">
@@ -96,6 +110,7 @@ h3{margin:0;font-size:20px}
     <div id="size"></div>
     <div id="text"></div>
     <div id="hint"><span id="ear">👏</span><span>מחאו כף כשמוכנים<br><small>או געו במסך</small></span></div>
+    <div id="lane"><b id="laneLine"></b><span id="laneDot"></span><div id="laneMarks"></div></div>
     <div id="bar"><i></i></div>
     <div id="note"></div>
     <button id="redo">↺ לצלם שוב את השוט הקודם</button>
@@ -114,12 +129,21 @@ h3{margin:0;font-size:20px}
   <div class="row"><button class="pri" id="share">שיתוף</button><button id="save">שמירה</button></div>
   <div class="row"><button id="again">לצלם עוד אחד</button></div>
   <div id="msg"></div>
+  <div class="cal">
+    <p><b style="color:#fff">מדידת הביט</b> · הפעולה לא יושבת בול על המכה? מזיזים ורואים שוב</p>
+    <div class="row"><button id="calLate">הפעולה מאחרת</button><button id="calEarly">הפעולה מקדימה</button></div>
+    <div class="row"><button id="fixTog"></button></div>
+    <p id="calTxt"></p>
+  </div>
 </section>
 
 <script>
 "use strict";
 const $=s=>document.querySelector(s);
 const BPM=120, BEAT=60/BPM, END_BEATS=4, PRE=0.06;
+const LEAD=2;   /* beats between "action!" and the beat line: time to fall, reach, open */
+let actT=0,hitT=0,LAT=0,hitShown=false,laneT0=0,laneT1=1,OFFSET=0,useFix=true;
+try{OFFSET=parseFloat(localStorage.getItem("cc_offset"))||0;useFix=localStorage.getItem("cc_fix")!=="0"}catch(e){}
 /* hit = on which beat inside the shot the action should land */
 const RECIPE={name:"הדלת",shots:[
   {size:"שוט רחב",text:"מישהו פותח את הדלת ונכנס",beats:4,hit:1},
@@ -171,6 +195,7 @@ async function renderTrack(beats,mode){
 async function initAudio(){
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
   await ac.resume();
+  LAT=Math.min(0.3,Math.max(0,ac.outputLatency||ac.baseLatency||0));   /* how late the phone's speaker is */
   if(!grooveBuf){grooveBuf=await renderTrack(16,"groove");finalBuf=await renderTrack(TOTAL_BEATS+END_BEATS,"full")}
 }
 function startGroove(){
@@ -179,12 +204,13 @@ function startGroove(){
   grooveT0=ac.currentTime+0.1;grooveSrc.start(grooveT0);
 }
 function stopGroove(){try{grooveSrc&&grooveSrc.stop()}catch(e){}grooveSrc=null}
+function boom(t){const s=ac.createOscillator(),g=ac.createGain();s.frequency.setValueAtTime(170,t);s.frequency.exponentialRampToValueAtTime(48,t+0.2);g.gain.setValueAtTime(1,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.4);s.connect(g).connect(ac.destination);s.start(t);s.stop(t+0.42);beep(t,2300,0.09)}
 function beep(t,f,d){const s=ac.createOscillator(),g=ac.createGain();s.frequency.value=f;g.gain.setValueAtTime(0.5,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);s.connect(g).connect(ac.destination);s.start(t);s.stop(t+d+0.02)}
 
 /* ---------- camera + microphone ---------- */
 function demoStream(){
   const c=document.createElement("canvas");c.width=360;c.height=640;const x=c.getContext("2d");
-  (function d(){const t=ac?ac.currentTime:0,late=goT+0.2,on=(st==="rec"||st==="count")&&t>=late&&t<late+0.5;
+  (function d(){const t=ac?ac.currentTime:0,late=hitT+0.2,on=(st==="rec"||st==="count")&&t>=late&&t<late+0.5;
     x.fillStyle=on?"#2a1140":"#10202c";x.fillRect(0,0,360,640);
     x.fillStyle=on?"#ffd60a":"#3a5a70";const k=on?Math.min(1,(t-late)/0.25):0;x.fillRect(60+k*160,220,90+k*60,200);
     x.fillStyle="#fff";x.font="bold 22px system-ui";x.textAlign="center";x.fillText("DEMO · אין מצלמה",180,60);x.fillText("שוט "+(idx+1),180,600);
@@ -216,7 +242,7 @@ function showShot(note){
   st="wait";const s=SHOTS[idx];paintDots();
   $("#shoot").classList.remove("rec");$("#size").textContent=`שוט ${idx+1} מתוך ${SHOTS.length} · ${s.size}`;$("#text").textContent=s.text;
   $("#hint").style.visibility="visible";$("#note").textContent=note||"";$("#redo").style.visibility=idx>0?"visible":"hidden";
-  $("#hint span:last-child").innerHTML=analyser?"מחאו כף כשמוכנים<br><small>או געו במסך</small>":"געו במסך כשמוכנים<br><small>אין גישה למיקרופון</small>";
+  $("#hint span:last-child").innerHTML=analyser?"השחקן מוחא כף כשמוכן<br><small>או שהצלם נוגע במסך</small>":"הצלם נוגע במסך כשמוכנים<br><small>אין גישה למיקרופון</small>";
   if(grooveGain)grooveGain.gain.setTargetAtTime(0.55,ac.currentTime,0.05);lastClap=ac.currentTime;
 }
 function pop(txt,act){const b=$("#big");b.textContent=txt;b.classList.toggle("act",!!act);b.classList.remove("pop");void b.offsetWidth;b.classList.add("pop")}
@@ -224,8 +250,12 @@ function clap(){
   if(st!=="wait")return;st="count";const s=SHOTS[idx];
   $("#hint").style.visibility="hidden";$("#redo").style.visibility="hidden";$("#note").textContent="";
   const k=Math.ceil((ac.currentTime+0.12-grooveT0)/BEAT);
-  countT=[0,1,2].map(i=>grooveT0+(k+i)*BEAT);goT=grooveT0+(k+3)*BEAT;endT=goT+(s.beats-s.hit)*BEAT+0.6;countShown=-1;
-  countT.forEach(t=>beep(t,1100,0.07));beep(goT,1760,0.16);
+  const lead=s.lead||LEAD;
+  countT=[0,1,2].map(i=>grooveT0+(k+i)*BEAT);actT=grooveT0+(k+3)*BEAT;hitT=actT+lead*BEAT;endT=hitT+(s.beats-s.hit)*BEAT+0.6+LAT;countShown=-1;hitShown=false;
+  countT.forEach(t=>beep(t,1100,0.07));beep(actT,1760,0.16);for(let i=1;i<lead;i++)beep(actT+i*BEAT,1100,0.05);boom(hitT);
+  laneT0=countT[0];laneT1=hitT+BEAT;const pc=t=>((t-laneT0)/(laneT1-laneT0)*100)+"%";
+  $("#laneLine").style.left=pc(hitT);$("#laneDot").style.left="0%";$("#laneDot").style.display="block";
+  $("#laneMarks").innerHTML=countT.map((t,i)=>`<span class="mk" style="left:${pc(t)}">${3-i}</span>`).join("")+`<span class="mk" style="left:${pc(actT)}">אקשן</span><span class="mk hit" style="left:${pc(hitT)}">הביט</span>`;
   grooveGain.gain.setTargetAtTime(0.9,ac.currentTime,0.05);
   chunks=[];motion=[];prevFrame=null;const mime=pickMime(false);
   rec=new MediaRecorder(camStream,mime?{mimeType:mime,videoBitsPerSecond:5e6}:{});
@@ -239,17 +269,17 @@ function sampleMotion(t){
   if(prevFrame)motion.push({t,m:sum/1008});prevFrame=g;
 }
 /* find when the action really happened, near the beat it was aimed at */
-function findHit(){
-  const w=motion.filter(s=>s.t>=goT-0.45&&s.t<=goT+0.5);if(w.length<5)return goT;
+function findHit(c){
+  const w=motion.filter(s=>s.t>=c-0.35&&s.t<=c+0.4);if(w.length<5)return c;
   const sorted=motion.map(s=>s.m).sort((a,b)=>a-b),med=sorted[sorted.length>>1];
   let pk=w[0];w.forEach(s=>{if(s.m>pk.m)pk=s});
-  if(pk.m<med*2.5+2)return goT;                 /* no clear moment: trust the beat */
+  if(pk.m<med*3+3)return c;                     /* no clear moment: trust the beat */
   return w.find(s=>s.m>=pk.m*0.5).t;
 }
 function shotDone(){
-  const s=SHOTS[idx],hitT=findHit(),fix=hitT-goT;
+  const heard=hitT+LAT,fix=findHit(heard)-heard;   /* heard = when the boom actually came out of the speaker */
   const blob=new Blob(chunks,{type:rec.mimeType||chunks[0]&&chunks[0].type||"video/webm"});
-  clips[idx]={blob,inT:Math.max(0,hitT-recT0-s.hit*BEAT),fix};
+  clips[idx]={blob,base:heard-recT0,fix};
   const note=Math.abs(fix)<0.06?"✓ בול על הביט":`✓ הזזתי ${Math.abs(fix).toFixed(2)} שניות כדי שיישב על הביט`;
   idx++;if(idx>=SHOTS.length)render();else showShot(note);
 }
@@ -264,31 +294,37 @@ function loop(){
     }
   }
   /* beat pulse on the frame */
-  const ph=((t-grooveT0)/BEAT)%1,p=$("#pulse");if(st==="wait"||st==="count"||st==="rec"){p.style.opacity=ph>=0?Math.max(0,1-ph*3):0;p.style.borderWidth="5px"}else p.style.opacity=0;
-  if(st==="count"||st==="rec")sampleMotion(t);
+  const tv=t-LAT;   /* what is being heard right now: the screen follows the sound */
+  const ph=((tv-grooveT0)/BEAT)%1,p=$("#pulse");if(st==="wait"||st==="count"||st==="rec"){const big=st==="rec"&&hitShown&&tv-hitT<0.3;p.style.opacity=big?1:ph>=0?Math.max(0,1-ph*3):0;p.style.borderWidth=big?"18px":"5px"}else p.style.opacity=0;
+  if(st==="count"||st==="rec"){
+    sampleMotion(t);const d=$("#laneDot"),f=(tv-laneT0)/(laneT1-laneT0);
+    d.style.left=Math.max(0,Math.min(1,f))*100+"%";d.style.display=f>1?"none":"block";d.style.background=tv>=hitT?"var(--accent)":"#fff";
+  }
   if(st==="count"){
-    for(let i=2;i>=0;i--)if(t>=countT[i]&&countShown<i){countShown=i;pop(String(3-i));break}
-    if(t>=goT){st="rec";pop("אקשן!",true)}
+    for(let i=2;i>=0;i--)if(tv>=countT[i]&&countShown<i){countShown=i;pop(String(3-i));break}
+    if(tv>=actT){st="rec";pop("אקשן!",true)}
   }
   if(st==="rec"){
-    const s=SHOTS[idx],dur=(s.beats-s.hit)*BEAT;$("#bar i").style.width=Math.min(100,(t-goT)/dur*100)+"%";
+    if(!hitShown&&tv>=hitT){hitShown=true;pop("💥",true)}
+    const s=SHOTS[idx],dur=(s.beats-s.hit)*BEAT;$("#bar i").style.width=Math.max(0,Math.min(100,(tv-hitT)/dur*100))+"%";
     if(t>=endT){st="saving";$("#bar i").style.width="0";try{rec.stop()}catch(e){shotDone()}}
   }
 }
 
 /* ---------- build the clip: straight onto the beat, no timeline ---------- */
 function once(el,ev,ms){return new Promise(r=>{const f=()=>{el.removeEventListener(ev,f);r()};el.addEventListener(ev,f);setTimeout(f,ms||3000)})}
-async function prepVideo(c){
+async function prepVideo(c,i){
+  const inT=Math.max(0,c.base+(useFix?c.fix:0)+OFFSET-SHOTS[i].hit*BEAT);
   const v=document.createElement("video");v.muted=true;v.playsInline=true;v.preload="auto";v.src=URL.createObjectURL(c.blob);
   await once(v,"loadedmetadata");
   if(!isFinite(v.duration)){v.currentTime=1e101;await once(v,"timeupdate")}
-  v.currentTime=Math.max(0,c.inT-PRE);await once(v,"seeked");return v;
+  v.currentTime=Math.max(0,inT-PRE);await once(v,"seeked");return v;
 }
 function cover(x,v,W,H,sc){const vw=v.videoWidth,vh=v.videoHeight;if(!vw)return;const s=Math.max(W/vw,H/vh)*sc,dw=vw*s,dh=vh*s;x.drawImage(v,(W-dw)/2,(H-dh)/2,dw,dh)}
 async function render(){
   st="render";cancelAnimationFrame(raf);stopGroove();$("#shoot").classList.remove("rec");show("render");
   const cv=$("#cv"),x=cv.getContext("2d"),W=cv.width,H=cv.height;x.fillStyle="#000";x.fillRect(0,0,W,H);
-  const vids=await Promise.all(clips.map(prepVideo));
+  const vids=await Promise.all(clips.map((c,i)=>prepVideo(c,i)));
   const starts=[];let c=0;SHOTS.forEach(s=>{starts.push(c*BEAT);c+=s.beats});const total=c*BEAT,endAll=total+END_BEATS*BEAT;
   const dest=ac.createMediaStreamDestination(),src=ac.createBufferSource();src.buffer=finalBuf;src.connect(dest);src.connect(ac.destination);
   const ms=new MediaStream([...cv.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]);
@@ -319,8 +355,18 @@ async function render(){
 }
 function finish(){
   const v=$("#out");v.src=URL.createObjectURL(finalBlob);show("done");v.play().catch(()=>{});
-  $("#msg").textContent=clips.map((c,i)=>`שוט ${i+1}: ${Math.abs(c.fix)<0.06?"בול":(c.fix>0?"+":"")+c.fix.toFixed(2)+" שנ׳"}`).join(" · ");
-  [camStream,micStream].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));camStream=micStream=null;analyser=null;
+  $("#msg").textContent="תיקון אוטומטי: "+clips.map((c,i)=>`שוט ${i+1}: ${Math.abs(c.fix)<0.06?"בול":(c.fix>0?"+":"")+c.fix.toFixed(2)}`).join(" · ");
+  [camStream,micStream].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));camStream=micStream=null;analyser=null;paintCal();
+}
+function paintCal(){
+  $("#fixTog").textContent="תיקון אוטומטי: "+(useFix?"פועל":"כבוי");
+  $("#calTxt").innerHTML=`<span dir="ltr">כיוון ${OFFSET>0?"+":""}${OFFSET.toFixed(2)} · רמקול ${LAT.toFixed(2)}</span> · תגידו לקלוד את המספרים האלה`;
+}
+function recal(d,tog){
+  if(st!=="render"||!clips.length||$("#render").classList.contains("on"))return;
+  if(tog)useFix=!useFix;else OFFSET=Math.max(-0.5,Math.min(0.5,Math.round((OFFSET+d)*100)/100));
+  try{localStorage.setItem("cc_offset",OFFSET);localStorage.setItem("cc_fix",useFix?"1":"0")}catch(e){}
+  $("#out").pause();render();
 }
 function fileName(){return "clip-clap-"+Date.now()+((finalBlob.type||"").includes("mp4")?".mp4":".webm")}
 
@@ -335,6 +381,7 @@ $("#start").onclick=begin;$("#again").onclick=()=>{$("#out").pause();begin()};
 $("#shoot").addEventListener("click",e=>{if(e.target.closest("button"))return;clap()});
 $("#redo").onclick=()=>{if(st==="wait"&&idx>0){idx--;showShot("מצלמים שוב")}};
 $("#flip").onclick=async()=>{if(st!=="wait")return;facing=facing==="environment"?"user":"environment";await openCam()};
+$("#calLate").onclick=()=>recal(0.05);$("#calEarly").onclick=()=>recal(-0.05);$("#fixTog").onclick=()=>recal(0,true);
 $("#quit").onclick=()=>{st="idle";closeAll();show("home")};
 $("#save").onclick=()=>{const a=document.createElement("a");a.href=$("#out").src;a.download=fileName();document.body.appendChild(a);a.click();a.remove();$("#msg").textContent="נשמר בהורדות."};
 $("#share").onclick=async()=>{
@@ -343,7 +390,7 @@ $("#share").onclick=async()=>{
     $("#msg").textContent="במכשיר הזה אין שיתוף ישיר. לחצו על שמירה."}
   catch(e){if(e&&e.name!=="AbortError")$("#msg").textContent="השיתוף לא הצליח. לחצו על שמירה."}
 };
-window.__cc={get st(){return st},get idx(){return idx},get clips(){return clips},get demo(){return demo},get motion(){return motion},get goT(){return goT},clap};
+window.__cc={get st(){return st},get idx(){return idx},get clips(){return clips},get demo(){return demo},get motion(){return motion},get hitT(){return hitT},get actT(){return actT},get lat(){return LAT},get offset(){return OFFSET},clap};
 </script>
 </body>
 </html>
